@@ -6,8 +6,8 @@ import os
 
 # import copy
 
-class DivBS(SelectionMethod):
-    method_name = 'DivBS'
+class CCSBS(SelectionMethod):
+    method_name = 'CCSBS'
 
     def __init__(self, config, logger):
         super().__init__(config, logger)
@@ -55,77 +55,5 @@ class DivBS(SelectionMethod):
         else:
             raise NotImplementedError
 
-    def calc_grad(self, inputs, targets, indexes):
-        model = self.model.module if isinstance(self.model, torch.nn.DataParallel) else self.model
-        model.eval()
-        outputs, features = model.feat_nograd_forward(inputs)
-        loss = torch.nn.functional.cross_entropy(outputs, targets)
-        with torch.no_grad():
-            grad_out = torch.autograd.grad(loss, outputs, retain_graph=True)[0]
-            grad = grad_out.unsqueeze(-1) * features.unsqueeze(1)
-            grad = grad.view(grad.shape[0], -1)
-        model.train()
-        if self.reduce_dim:
-            dim = grad.shape[1]
-            dim_reduced = dim // self.reduce_dim
-            index = np.random.choice(dim, dim_reduced, replace=False)
-            grad = grad[:, index]
-        grad_mean = grad.mean(dim=0)
-        return grad_mean, grad
-
-    def greedy_selection(self, grad_mean, grad, number_to_select):
-        # print(grad.shape)
-        residual = grad_mean.unsqueeze(-1) if grad_mean.dim() == 1 else grad_mean
-        index_selected = []
-        D = grad.t()
-        selected_element = []
-        for i in range(number_to_select):
-            correlations = torch.abs(torch.matmul(D.t(), residual))
-            try:
-                idx = torch.multinomial(correlations.squeeze(), 1)
-            except:
-                break
-            # print(f'idx: {idx.shape}')
-            index_selected.append(idx.item())
-            if len(selected_element) > 0:
-                selected_element_matrix = torch.cat(selected_element, dim=1)  # n_features, n_selected
-                D_selected = D[:, idx] - torch.matmul(selected_element_matrix,
-                                                      torch.matmul(selected_element_matrix.t(), D[:, idx]))
-            else:
-                D_selected = D[:, idx]
-            D_selected = D_selected / torch.norm(D_selected)
-            selected_element.append(D_selected)
-
-            residual = residual - torch.matmul(D_selected.t(), residual) * D_selected
-
-        if len(selected_element) < number_to_select:
-            num_random = number_to_select - len(selected_element)
-            self.logger.info(
-                f'number_to_select: {number_to_select}, len(selected_element): {len(selected_element)}, num_random: {num_random}')
-            remaining_indices = list(set(range(grad.shape[0])) - set(index_selected))
-            random_indices = np.random.choice(remaining_indices, num_random, replace=False)
-            index_selected.extend(random_indices)
-
-        return index_selected
-
     def before_batch(self, i, inputs, targets, indexes, epoch):
-        if self.iter_selection:
-            ratio = self.get_ratio_per_epoch(epoch)
-            if ratio == 1.0:
-                if i == 0:
-                    self.logger.info('using all samples')
-                return super().before_batch(i, inputs, targets, indexes, epoch)
-            else:
-                if i == 0:
-                    self.logger.info(f'balance: {self.balance}')
-                    self.logger.info('selecting samples for epoch {}, ratio {}'.format(epoch, ratio))
-            grad_mean, grad = self.calc_grad(inputs, targets, indexes)
-            selected_num_samples = int(inputs.shape[0] * ratio)
-            indices = self.greedy_selection(grad_mean, grad, selected_num_samples)
-            inputs = inputs[indices]
-            targets = targets[indices]
-            indexes = indexes[indices]
-            return inputs, targets, indexes
-
-        else:
-            return super().before_batch(i, inputs, targets, indexes, epoch)
+        # to do
